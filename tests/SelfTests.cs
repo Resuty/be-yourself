@@ -2,7 +2,9 @@ using System;
 using System.Drawing;
 using System.Drawing.Imaging;
 using System.IO;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 using BeYourself;
 
@@ -35,6 +37,7 @@ internal static class SelfTests
             if (Array.IndexOf(arguments, "--desktop") >= 0)
             {
                 TestDesktop();
+                TestVisibleDesktopLayer();
                 TestSettingsForms(output);
                 TestTrayApplication(temporary);
             }
@@ -134,6 +137,9 @@ internal static class SelfTests
     {
         IntPtr host = NativeMethods.FindDesktopHost();
         Check(host != IntPtr.Zero, "Explorer desktop host exists");
+        var className = new StringBuilder(64);
+        NativeMethods.GetClassName(host, className, className.Capacity);
+        Check(className.ToString() == "SHELLDLL_DefView", "overlay attaches inside the desktop foreground compositor");
         using (var overlay = new DesktopOverlay())
         {
             var settings = Settings.Defaults();
@@ -154,6 +160,103 @@ internal static class SelfTests
             Check(!overlay.Visible, "hide from tray removes desktop text");
             settings.Visible = true; overlay.Display(settings);
             Check(overlay.Visible && overlay.Attached, "show from tray restores desktop attachment");
+        }
+    }
+
+    [DllImport("dwmapi.dll")] private static extern int DwmFlush();
+    private static void WaitForComposition()
+    {
+        Application.DoEvents(); DwmFlush(); Thread.Sleep(100); DwmFlush();
+    }
+    private static Rectangle FindUncoveredDesktop(IntPtr root, Size size)
+    {
+        foreach (var screen in Screen.AllScreens)
+        {
+            var area = screen.WorkingArea;
+            for (int y = area.Top + 80; y + size.Height < area.Bottom; y += 120)
+                for (int x = area.Left + 120; x + size.Width < area.Right; x += 160)
+                {
+                    bool clear = true;
+                    foreach (int dx in new[] { 0, size.Width / 2, size.Width - 1 })
+                        foreach (int dy in new[] { 0, size.Height / 2, size.Height - 1 })
+                            if (NativeMethods.GetAncestor(NativeMethods.WindowFromPoint(new NativeMethods.Point(x + dx, y + dy)), 2) != root) clear = false;
+                    if (clear) return new Rectangle(x, y, size.Width, size.Height);
+                }
+        }
+        return Rectangle.Empty;
+    }
+    private static int CountVisibleText(Rectangle bounds, Bitmap expected, out int opaquePixels)
+    {
+        int matched = 0; opaquePixels = 0;
+        using (var screen = new Bitmap(bounds.Width, bounds.Height))
+        using (var graphics = Graphics.FromImage(screen))
+        {
+            graphics.CopyFromScreen(bounds.Location, Point.Empty, bounds.Size);
+            for (int y = 0; y < screen.Height; y++)
+                for (int x = 0; x < screen.Width; x++)
+                {
+                    Color wanted = expected.GetPixel(x, y), actual = screen.GetPixel(x, y);
+                    if (wanted.A == 255 && wanted.R > 250 && wanted.G < 5 && wanted.B > 250)
+                    {
+                        opaquePixels++;
+                        if (actual.R > 240 && actual.G < 20 && actual.B > 240) matched++;
+                    }
+                }
+        }
+        return matched;
+    }
+    private static void TestVisibleDesktopLayer()
+    {
+        var settings = Settings.Defaults();
+        settings.Text = "BE YOURSELF"; settings.FontSize = 24;
+        settings.ColorArgb = Color.Magenta.ToArgb(); settings.Opacity = 100;
+        using (var overlay = new DesktopOverlay())
+        {
+            Check(overlay.Display(settings), "pixel regression overlay attaches");
+            float dpi;
+            using (var graphics = Graphics.FromHwnd(overlay.DesktopHost)) dpi = graphics.DpiX;
+            using (var expected = MottoRenderer.Render(settings, new Size(2000, 1000), dpi))
+            {
+                var root = NativeMethods.GetAncestor(overlay.DesktopHost, 2);
+                var bounds = FindUncoveredDesktop(root, expected.Size);
+                if (bounds.IsEmpty)
+                {
+                    Console.WriteLine("SKIP: pixel visibility needs an uncovered desktop area; no applications were moved.");
+                    return;
+                }
+                Check(expected.Size == overlay.LastBounds.Size, "pixel regression uses the actual overlay DPI and size");
+                var origin = new NativeMethods.Point(bounds.X, bounds.Y);
+                NativeMethods.MapWindowPoints(IntPtr.Zero, overlay.DesktopHost, ref origin, 1);
+                NativeMethods.SetWindowPos(overlay.Handle, IntPtr.Zero, origin.X, origin.Y, bounds.Width, bounds.Height, 0x50);
+                WaitForComposition();
+                int opaque;
+                int matched = CountVisibleText(bounds, expected, out opaque);
+                Check(opaque > 100 && matched >= opaque * 0.95, "text is actually visible above live desktop wallpaper: " + matched + "/" + opaque + " pixels");
+                using (var application = new CoverWindow())
+                {
+                    application.Bounds = bounds;
+                    application.Show(); WaitForComposition();
+                    matched = CountVisibleText(bounds, expected, out opaque);
+                    Check(matched < opaque * 0.05, "ordinary application window covers desktop motto");
+                    application.Close();
+                }
+                WaitForComposition();
+                matched = CountVisibleText(bounds, expected, out opaque);
+                Check(matched >= opaque * 0.95, "motto reappears above wallpaper after application closes");
+            }
+        }
+    }
+    private sealed class CoverWindow : Form
+    {
+        internal CoverWindow()
+        {
+            FormBorderStyle = FormBorderStyle.None; ShowInTaskbar = false;
+            StartPosition = FormStartPosition.Manual; BackColor = Color.FromArgb(13, 37, 69);
+        }
+        protected override bool ShowWithoutActivation { get { return true; } }
+        protected override CreateParams CreateParams
+        {
+            get { var value = base.CreateParams; value.ExStyle |= NativeMethods.WS_EX_NOACTIVATE | NativeMethods.WS_EX_TOOLWINDOW; return value; }
         }
     }
     private static void TestSettingsForms(string output)
@@ -195,7 +298,7 @@ internal static class SelfTests
         store.Save(Settings.Defaults());
         Exception failure = null;
         using (var context = new TrayApplication(store))
-        using (var timer = new Timer { Interval = 100 })
+        using (var timer = new System.Windows.Forms.Timer { Interval = 100 })
         {
             timer.Tick += delegate
             {

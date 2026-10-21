@@ -6,8 +6,8 @@ using System.Windows.Forms;
 
 [assembly: AssemblyTitle("Be yourself")]
 [assembly: AssemblyDescription("A quiet desktop reminder. 自律标语 / デスクトップのひとこと")]
-[assembly: AssemblyVersion("1.0.0.0")]
-[assembly: AssemblyFileVersion("1.0.0.0")]
+[assembly: AssemblyVersion("1.0.1.0")]
+[assembly: AssemblyFileVersion("1.0.1.0")]
 [assembly: InternalsVisibleTo("BeYourself.Tests")]
 
 namespace BeYourself

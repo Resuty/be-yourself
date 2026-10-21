@@ -10,7 +10,14 @@ namespace BeYourself
         internal IntPtr DesktopHost { get; private set; }
         internal Rectangle LastBounds { get; private set; }
         private Settings settings;
-        internal bool Attached { get { return IsHandleCreated && NativeMethods.IsWindow(DesktopHost) && NativeMethods.GetParent(Handle) == DesktopHost; } }
+        internal bool Attached
+        {
+            get
+            {
+                return IsHandleCreated && NativeMethods.IsWindow(DesktopHost) &&
+                    NativeMethods.GetParent(Handle) == DesktopHost && NativeMethods.FindDesktopHost() == DesktopHost;
+            }
+        }
 
         public DesktopOverlay()
         {

@@ -19,7 +19,7 @@ Copy-Item -LiteralPath (Join-Path $projectRoot 'README.md') -Destination (Join-P
 
 if ($Test -or $DesktopTest) {
     $testExecutable = Join-Path $artifactRoot 'BeYourself.Tests.exe'
-    & $compiler /nologo /target:exe /platform:anycpu /optimize+ /warnaserror+ /codepage:65001 "/out:$testExecutable" "/reference:$executable" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll (Join-Path $projectRoot 'tests\SelfTests.cs')
+    & $compiler /nologo /target:exe /platform:anycpu /optimize+ /warnaserror+ /codepage:65001 "/out:$testExecutable" "/win32manifest:$projectRoot\app.manifest" "/reference:$executable" /reference:System.dll /reference:System.Core.dll /reference:System.Drawing.dll /reference:System.Windows.Forms.dll /reference:System.Runtime.Serialization.dll (Join-Path $projectRoot 'tests\SelfTests.cs')
     if ($LASTEXITCODE -ne 0) { throw 'Test compilation failed.' }
     Copy-Item -LiteralPath $executable -Destination $artifactRoot -Force
     Copy-Item -LiteralPath ($executable + '.config') -Destination ($testExecutable + '.config') -Force
@@ -28,6 +28,6 @@ if ($Test -or $DesktopTest) {
     & $testExecutable @testArguments
     if ($LASTEXITCODE -ne 0) { throw 'Tests failed.' }
 }
-$package = Join-Path $outputRoot 'BeYourself-v1.0.0-windows.zip'
+$package = Join-Path $outputRoot 'BeYourself-v1.0.1-windows.zip'
 Compress-Archive -LiteralPath $executable, ($executable + '.config'), (Join-Path $outputRoot 'README.md') -DestinationPath $package -Force
 Get-Item -LiteralPath $executable, $package | Select-Object Name, Length

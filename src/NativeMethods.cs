@@ -28,6 +28,8 @@ namespace BeYourself
         [DllImport("user32.dll", CharSet = CharSet.Unicode)] internal static extern int GetClassName(IntPtr handle, StringBuilder name, int capacity);
         [DllImport("user32.dll")] internal static extern bool IsWindow(IntPtr handle);
         [DllImport("user32.dll")] internal static extern IntPtr GetParent(IntPtr handle);
+        [DllImport("user32.dll")] internal static extern IntPtr GetAncestor(IntPtr handle, uint flags);
+        [DllImport("user32.dll")] internal static extern IntPtr WindowFromPoint(Point point);
         [DllImport("user32.dll", SetLastError = true)] internal static extern IntPtr SetParent(IntPtr child, IntPtr parent);
         [DllImport("user32.dll", EntryPoint = "GetWindowLongW")] internal static extern int GetWindowLong(IntPtr handle, int index);
         [DllImport("user32.dll", EntryPoint = "SetWindowLongW")] internal static extern int SetWindowLong(IntPtr handle, int index, int value);
@@ -47,7 +49,8 @@ namespace BeYourself
         [DllImport("user32.dll")] internal static extern bool DestroyIcon(IntPtr icon);
         [DllImport("user32.dll")] internal static extern IntPtr SendMessage(IntPtr handle, int message, IntPtr wParam, IntPtr lParam);
 
-        // Explorer's icon host is above ordinary wallpaper hosts and below application windows.
+        // Modern Progman has no redirection bitmap: a layered sibling of DefView can be invisible.
+        // Attach inside DefView's foreground compositor, above wallpaper but below application windows.
         // shortcut: Explorer's private window classes may change; stay hidden and retry if absent.
         internal static IntPtr FindDesktopHost()
         {
@@ -56,9 +59,11 @@ namespace BeYourself
             {
                 var name = new StringBuilder(64);
                 GetClassName(handle, name, name.Capacity);
-                if ((name.ToString() == "Progman" || name.ToString() == "WorkerW") &&
-                    FindWindowEx(handle, IntPtr.Zero, "SHELLDLL_DefView", null) != IntPtr.Zero)
-                { found = handle; return false; }
+                if (name.ToString() == "Progman" || name.ToString() == "WorkerW")
+                {
+                    IntPtr view = FindWindowEx(handle, IntPtr.Zero, "SHELLDLL_DefView", null);
+                    if (view != IntPtr.Zero) { found = view; return false; }
+                }
                 return true;
             }, IntPtr.Zero);
             return found;
